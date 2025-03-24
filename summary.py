@@ -6,7 +6,7 @@ import traceback
 sys.path.append(os.getcwd())
 
 
-def calculate_stats_from_trades(trades):
+def calculate_stats_from_trades(trades, starting_capital):
     try:
         stats = {}
         current_drawdown = 0
@@ -16,6 +16,7 @@ def calculate_stats_from_trades(trades):
 
         max_capital_deployment = max(trades["Entry Price"])
         totalCost = trades["Cost per Lot"].sum()
+        capital_deployment_total = max(trades["Entry Price"]) * len(trades) + totalCost
 
         for pnl in trades["Net PnL per Lot"]:
             cumulative_pnl += pnl
@@ -66,14 +67,14 @@ def calculate_stats_from_trades(trades):
         else:
             expiry_day_win_ratio = 0
 
-        trades_between_915_920 = trades[
+        trades_between_0920_1445 = trades[
             (
                 trades["Entry Timestamp"].dt.time
-                >= datetime.strptime("09:15:00", "%H:%M:%S").time()
+                >= datetime.strptime("09:20:00", "%H:%M:%S").time()
             )
             & (
                 trades["Entry Timestamp"].dt.time
-                <= datetime.strptime("09:20:00", "%H:%M:%S").time()
+                < datetime.strptime("14:45:00", "%H:%M:%S").time()
             )
         ]
 
@@ -88,16 +89,18 @@ def calculate_stats_from_trades(trades):
             )
         ]
 
-        if not trades_between_915_920.empty:
-            totalNumberOfTrades_915_920 = len(trades_between_915_920)
-            pnl_915_920 = trades_between_915_920["Net PnL per Lot"].sum()
-            win_ratio_915_920 = len(
-                trades_between_915_920[trades_between_915_920["Net PnL per Lot"] > 0]
-            ) / len(trades_between_915_920)
+        if not trades_between_0920_1445.empty:
+            totalNumberOfTrades_0920_1445 = len(trades_between_0920_1445)
+            pnl_0920_1445 = trades_between_0920_1445["Net PnL per Lot"].sum()
+            win_ratio_0920_1445 = len(
+                trades_between_0920_1445[
+                    trades_between_0920_1445["Net PnL per Lot"] > 0
+                ]
+            ) / len(trades_between_0920_1445)
         else:
-            totalNumberOfTrades_915_920 = 0
-            pnl_915_920 = 0
-            win_ratio_915_920 = 0
+            totalNumberOfTrades_0920_1445 = 0
+            pnl_0920_1445 = 0
+            win_ratio_0920_1445 = 0
 
         if not trades_between_1445_1530.empty:
             totalNumberOfTrades_1445_1530 = len(trades_between_1445_1530)
@@ -128,6 +131,7 @@ def calculate_stats_from_trades(trades):
         stats.update(
             {
                 "Max Capital Deployment": max_capital_deployment,
+                "Total Capital Deployment": capital_deployment_total,
                 "Max Drawdown on Capital": (max_drawdown / max_capital_deployment),
                 "Return On Capital": (
                     (trades["Net PnL per Lot"].sum()) / max_capital_deployment
@@ -171,6 +175,29 @@ def calculate_stats_from_trades(trades):
                     if len(trades[trades["Net PnL per Lot"] < 0]) > 0
                     else "N/A"
                 ),
+                "CAGR": (
+                    (
+                        (
+                            (trades["Net PnL per Lot"].sum() + starting_capital)
+                            / starting_capital
+                        )
+                        - 1
+                    )
+                    if starting_capital > 0
+                    else "N/A"
+                ),
+                "Calmar Ratio": (
+                    (
+                        (
+                            (trades["Net PnL per Lot"].sum() + starting_capital)
+                            / starting_capital
+                        )
+                        - 1
+                    )
+                    / max_drawdown
+                    if max_drawdown > 0
+                    else "N/A"
+                ),
                 "Consecutive Wins": (
                     trades["Net PnL per Lot"]
                     .gt(0)
@@ -203,9 +230,9 @@ def calculate_stats_from_trades(trades):
                 "Expiry Day Net Pnl": expiry_day_pnl,
                 "Expiry Day Win Ratio": expiry_day_win_ratio,
                 "TotalNumberOfExpiryTrades": totalNumberOfExpiryTrades,
-                "9:15 to 9:20 Net PnL": pnl_915_920,
-                "9:15 to 9:20 Win Ratio": win_ratio_915_920,
-                "9:15 to 9:20 Trades": totalNumberOfTrades_915_920,
+                "9:20 to 14:45 Net PnL": pnl_0920_1445,
+                "9:20 to 14:45 Win Ratio": win_ratio_0920_1445,
+                "9:20 to 14:45 Trades": totalNumberOfTrades_0920_1445,
                 "14:45 to 15:30 Net PnL": pnl_1445_1530,
                 "14:45 to 15:30 Win Ratio": win_ratio_1445_1530,
                 "14:45 to 15:30 Trades": totalNumberOfTrades_1445_1530,
@@ -222,7 +249,7 @@ def calculate_stats_from_trades(trades):
         traceback.print_exc()
 
 
-def generate_markdown_report(trades, template_path, output_path):
+def generate_markdown_report(trades, template_path, output_path, starting_capital):
     try:
         with open(template_path, "r") as file:
             template = file.read()
@@ -255,6 +282,8 @@ def generate_markdown_report(trades, template_path, output_path):
             "Largest Winning Trade": 0,
             "Largest Losing Trade": 0,
             "Risk Reward Ratio": 0,
+            "Calmar Ratio": 0,
+            "CAGR": 0,
             "Consecutive Wins": 0,
             "Consecutive Losses": 0,
             "Max Drawdown": 0,
@@ -264,9 +293,9 @@ def generate_markdown_report(trades, template_path, output_path):
             "Expiry Day Net Pnl": 0,
             "Expiry Day Win Ratio": 0,
             "TotalNumberOfExpiryTrades": 0,
-            "9:15 to 9:20 Net PnL": 0,
-            "9:15 to 9:20 Win Ratio": 0,
-            "9:15 to 9:20 Trades": 0,
+            "9:20 to 14:45 Net PnL": 0,
+            "9:20 to 14:45 Win Ratio": 0,
+            "9:20 to 14:45 Trades": 0,
             "14:45 to 15:30 Net PnL": 0,
             "14:45 to 15:30 Win Ratio": 0,
             "14:45 to 15:30 Trades": 0,
@@ -274,7 +303,7 @@ def generate_markdown_report(trades, template_path, output_path):
         }
 
         if not trades.empty:
-            stats.update(calculate_stats_from_trades(trades))
+            stats.update(calculate_stats_from_trades(trades, starting_capital))
 
         try:
             report = template.format(**stats)

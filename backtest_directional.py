@@ -574,4 +574,4 @@ def backtest(start_date, end_date):
 
 # === RUN BACKTEST === #
 if __name__ == "__main__":
-    backtest("2024-01-01", "2024-12-31")
+    backtest("2024-05-31", "2024-12-31")
