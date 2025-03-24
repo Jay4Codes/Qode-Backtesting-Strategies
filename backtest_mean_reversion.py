@@ -328,11 +328,11 @@ def save_results(positions, orders, trading_day):
                 / 60,
                 "Lot Size": LOT_SIZE,
                 "Quantity": 1,
-                "Cost per Lot": position.entry_price * LOT_SIZE * 0.02,
+                "Cost per Lot": position.entry_price * LOT_SIZE * 0.002,
                 "Net PnL per Lot": (
                     (position.entry_price - position.exit_price) * LOT_SIZE
                 )
-                - (position.entry_price * LOT_SIZE * 0.02),
+                - (position.entry_price * LOT_SIZE * 0.002),
             }
             for position in positions
         ]
