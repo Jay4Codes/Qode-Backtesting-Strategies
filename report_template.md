@@ -19,7 +19,7 @@
 * **Total Trades** : {Total Trades}
 * **Profitable Trades** : {Profitable Trades}
 * **Losing Trades** : {Losing Trades}
-* **Average Duration** : {Average Duration} seconds
+* **Average Duration** : {Average Duration} minutes
 
 **Winning/Losing Trades**
 
@@ -28,8 +28,8 @@
 * **Largest Winning Trade** : ₹{Largest Winning Trade}
 * **Largest Losing Trade** : ₹{Largest Losing Trade}
 * **Risk Reward Ratio** : {Risk Reward Ratio}
-* **Calmar Ratio** : {Calmar Ratio}
 * **CAGR** : {CAGR}
+* **Calmar Ratio** : {Calmar Ratio}
 
 **Streak Analysis**
 

@@ -49,8 +49,8 @@ def calculate_stats_from_trades(trades, starting_capital):
             else 0
         )
 
-        if "Total Time" in trades:
-            avg_duration = trades["Total Time"].mean()
+        if "Hold Time" in trades:
+            avg_duration = trades["Hold Time"].mean()
         else:
             avg_duration = 0
 
@@ -138,7 +138,7 @@ def calculate_stats_from_trades(trades, starting_capital):
                 ),
                 "Total Cost": totalCost,
                 "PnL": trades["PnL per Lot"].sum(),
-                "Net PnL per Lot": trades["Net PnL per Lot"].sum(),
+                "Net PnL": trades["Net PnL per Lot"].sum(),
                 "Win Rate": (
                     len(trades[trades["PnL per Lot"] > 0]) / len(trades)
                     if len(trades) > 0
@@ -282,8 +282,8 @@ def generate_markdown_report(trades, template_path, output_path, starting_capita
             "Largest Winning Trade": 0,
             "Largest Losing Trade": 0,
             "Risk Reward Ratio": 0,
-            "Calmar Ratio": 0,
             "CAGR": 0,
+            "Calmar Ratio": 0,
             "Consecutive Wins": 0,
             "Consecutive Losses": 0,
             "Max Drawdown": 0,

@@ -4,11 +4,11 @@
 
 **Overall Metrics**
 
-* **Net PnL** : ₹0
-* **Win Rate** : 0.3128205128205128
-* **Profit Factor** : 0.9244315323805846
-* **Average Return per Trade** : ₹-39.06587740384613
-* **Expiry Day PnL**: ₹-5767.764074999996
+* **Net PnL** : ₹-175795.52474999995
+* **Win Rate** : 0.3022861981371719
+* **Profit Factor** : 0.7071531879992385
+* **Average Return per Trade** : ₹-148.85311155800164
+* **Expiry Day PnL**: ₹-59101.899825
 
 ---
 
@@ -16,35 +16,35 @@
 
 **Trade Statistics**
 
-* **Total Trades** : 780
-* **Profitable Trades** : 241
-* **Losing Trades** : 539
-* **Average Duration** : 0 seconds
+* **Total Trades** : 1181
+* **Profitable Trades** : 337
+* **Losing Trades** : 844
+* **Average Duration** : 39.53175275190517 minutes
 
 **Winning/Losing Trades**
 
-* **Average Winning Trade** : ₹1546.7113702282159
-* **Average Losing Trade** : ₹-748.105425974026
-* **Largest Winning Trade** : ₹11866.040550000005
-* **Largest Losing Trade** : ₹-2511.8700000000017
-* **Risk Reward Ratio** : 2.067504547523382
-* **Calmar Ratio** : -2.620611142055835e-05
-* **CAGR** : -0.30471384374999977
+* **Average Winning Trade** : ₹1259.6529763353117
+* **Average Losing Trade** : ₹-711.2542390699051
+* **Largest Winning Trade** : ₹12688.064400000003
+* **Largest Losing Trade** : ₹-5843.877675
+* **Risk Reward Ratio** : 1.7710305361167873
+* **CAGR** : -1.7579552474999995
+* **Calmar Ratio** : -0.00010948026038637148
 
 **Streak Analysis**
 
-* **Consecutive Wins** : 6
-* **Consecutive Losses** : 17
-* **Max Drawdown**: 11627.587125000002
-* **Percent Profitable Days** : 0.37155963302752293
+* **Consecutive Wins** : 5
+* **Consecutive Losses** : 20
+* **Max Drawdown**: 16057.280475000007
+* **Percent Profitable Days** : 0.29583333333333334
 
 ---
 
 ### Daily Performance
 
-* **Best Day PnL** : ₹12120.128775000008
-* **Worst Day PnL** : ₹-3896.7845250000005
+* **Best Day PnL** : ₹9421.959225000002
+* **Worst Day PnL** : ₹-21747.037199999995
 
 ---
 
-*Report generated on 2025-03-24 15:02:13*
+*Report generated on 2025-03-24 15:22:09*
