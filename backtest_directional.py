@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 import os
+import numpy as np
 
 
 # === CONFIG === #
@@ -11,7 +12,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/backtest_semi_directional.log"),
+        logging.FileHandler("logs/backtest_directional.log"),
         logging.StreamHandler(),
     ],
 )
@@ -22,13 +23,15 @@ NIFTY_INDEX_FILE = "database/index/nifty_2024.parquet"
 OPTIONS_FOLDER = "database/options/"
 LOT_SIZE = 75
 SLIPPAGE_PERCENT = 0.01
-ATR_PERIOD = 14
+EMA_PERIOD = 30
+ADX_PERIOD = 14
 START_TIME = "09:20:00"
 END_TIME = "15:20:00"
-EVENT_DAYS_TRADES = True
+EVENT_DAYS_TRADES = False
 EVENT_DAYS_LIST = ["2024-03-02", "2024-05-18", "2024-06-03"]
-PROFIT_TARGET = 0.2
+PROFIT_TARGET = 0.15
 STOP_LOSS = 0.1
+HOLD_TIME = 120
 
 
 class Position:
@@ -38,6 +41,7 @@ class Position:
         strike,
         option_type,
         entry_price,
+        entry_type,
         status,
         exit_price=None,
         exit_timestamp=None,
@@ -47,6 +51,7 @@ class Position:
         self.strike = strike
         self.option_type = option_type
         self.entry_price = entry_price
+        self.entry_type = entry_type
         self.status = status
         self.exit_price = exit_price
         self.exit_timestamp = exit_timestamp
@@ -99,7 +104,8 @@ def load_option_data(expiry_folder, strike, option_type, timestamp):
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df[df["timestamp"].dt.date == timestamp.date()]
 
-        df = calculate_atr(df)
+        df = calculate_ema(df)
+        df = calculate_adx(df)
         df = calculate_vwap(df)
 
         if timestamp is not None:
@@ -113,13 +119,32 @@ def load_option_data(expiry_folder, strike, option_type, timestamp):
     return None
 
 
-# === ATR CALCULATION === #
-def calculate_atr(df):
-    df["high-low"] = df["high"] - df["low"]
-    df["high-close"] = abs(df["high"] - df["close"].shift(1))
-    df["low-close"] = abs(df["low"] - df["close"].shift(1))
-    df["True Range"] = df[["high-low", "high-close", "low-close"]].max(axis=1)
-    df["ATR"] = df["True Range"].expanding(min_periods=ATR_PERIOD).mean()
+# === CALCULATE 30 EMA === #
+def calculate_ema(df):
+    df["EMA"] = df["close"].ewm(span=EMA_PERIOD, adjust=False).mean()
+    return df
+
+
+# === CALCULATE ADX (14) === #
+def calculate_adx(df):
+    df["+DM"] = np.where(
+        (df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]),
+        df["high"] - df["high"].shift(1),
+        0,
+    )
+    df["-DM"] = np.where(
+        (df["low"].shift(1) - df["low"]) > (df["high"] - df["high"].shift(1)),
+        df["low"].shift(1) - df["low"],
+        0,
+    )
+    df["+DI"] = (
+        df["+DM"].rolling(ADX_PERIOD).sum() / df["close"].rolling(ADX_PERIOD).sum()
+    ) * 100
+    df["-DI"] = (
+        df["-DM"].rolling(ADX_PERIOD).sum() / df["close"].rolling(ADX_PERIOD).sum()
+    ) * 100
+    df["ADX"] = abs(df["+DI"] - df["-DI"]) / abs(df["+DI"] + df["-DI"]) * 100
+    df["ADX"] = df["ADX"].rolling(ADX_PERIOD).mean()
 
     return df
 
@@ -150,16 +175,16 @@ def get_nearest_expiry(expiry_folders, timestamp):
     return nearest_expiry_folder
 
 
-def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
-    logger.info(f"Entry: {row['timestamp']} - {otm_ce['open']}")
+def enter_bullish_trade(row, atm_strike, otm_strike, atm_ce, otm_pe, positions, orders):
+    logger.info(f"Entry: {row['timestamp']} - {atm_ce['open']}")
 
-    entry_ce_price = otm_ce["open"] * SLIPPAGE_PERCENT + otm_ce["open"]
+    entry_ce_price = atm_ce["open"] * SLIPPAGE_PERCENT + atm_ce["open"]
     logger.info(f"Entry Price: {entry_ce_price}")
 
     orders.append(
         Order(
             row["timestamp"],
-            otm_strike,
+            atm_strike,
             "CE",
             entry_ce_price,
             "BUY",
@@ -169,12 +194,41 @@ def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
     positions.append(
         Position(
             entry_timestamp=row["timestamp"],
-            strike=otm_strike,
+            strike=atm_strike,
             option_type="CE",
             entry_price=entry_ce_price,
+            entry_type="Bullish",
             status=True,
         )
     )
+
+    entry_pe_price = otm_pe["open"] * SLIPPAGE_PERCENT + otm_pe["open"]
+    logger.info(f"Entry Price: {entry_pe_price}")
+
+    orders.append(
+        Order(
+            row["timestamp"],
+            otm_strike,
+            "PE",
+            entry_pe_price,
+            "BUY",
+        )
+    )
+
+    positions.append(
+        Position(
+            entry_timestamp=row["timestamp"],
+            strike=otm_strike,
+            option_type="PE",
+            entry_price=entry_pe_price,
+            entry_type="Bullish",
+            status=True,
+        )
+    )
+
+
+def enter_bearish_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
+    logger.info(f"Entry: {row['timestamp']} - {atm_pe['open']}")
 
     entry_pe_price = atm_pe["open"] * SLIPPAGE_PERCENT + atm_pe["open"]
     logger.info(f"Entry Price: {entry_pe_price}")
@@ -195,14 +249,37 @@ def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
             strike=atm_strike,
             option_type="PE",
             entry_price=entry_pe_price,
+            entry_type="Bearish",
+            status=True,
+        )
+    )
+
+    entry_ce_price = otm_ce["open"] * SLIPPAGE_PERCENT + otm_ce["open"]
+    logger.info(f"Entry Price: {entry_ce_price}")
+
+    orders.append(
+        Order(
+            row["timestamp"],
+            otm_strike,
+            "CE",
+            entry_ce_price,
+            "BUY",
+        )
+    )
+
+    positions.append(
+        Position(
+            entry_timestamp=row["timestamp"],
+            strike=otm_strike,
+            option_type="CE",
+            entry_price=entry_ce_price,
+            entry_type="Bearish",
             status=True,
         )
     )
 
 
-def check_exit_signal(
-    expiry_folder, timestamp, positions, signal_value, otm_ce_price, atm_pe_price
-):
+def check_exit_signal(expiry_folder, timestamp, positions):
     if timestamp > pd.to_datetime(f"{timestamp.date()} {END_TIME}"):
         return True, "EOD"
 
@@ -240,8 +317,14 @@ def check_exit_signal(
     if pnl <= -STOP_LOSS:
         return True, "Stop Loss Hit"
 
-    if otm_ce_price + atm_pe_price < signal_value:
-        return True, "Signal Reversed"
+    if (timestamp - call_position.entry_timestamp).total_seconds() / 60 > HOLD_TIME:
+        return True, "Hold Time Exceeded"
+
+    if call_position.entry_type == "Bullish" and call_option["ADX"] < 15:
+        return True, "Trend Reversal"
+
+    if put_position.entry_type == "Bearish" and put_option["ADX"] < 15:
+        return True, "Trend Reversal"
 
     return False, None
 
@@ -319,6 +402,7 @@ def save_results(positions, orders, trading_day):
                 "Strike": position.strike,
                 "Option Type": position.option_type,
                 "Entry Price": position.entry_price,
+                "Entry Type": position.entry_type,
                 "Exit Price": position.exit_price,
                 "Exit Timestamp": position.exit_timestamp,
                 "Exit Reason": position.exit_reason,
@@ -354,10 +438,10 @@ def save_results(positions, orders, trading_day):
         ]
     )
 
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("directional_results", exist_ok=True)
 
-    positions_df.to_csv(f"results/{trading_day}_positions.csv", index=False)
-    orders_df.to_csv(f"results/{trading_day}_orders.csv", index=False)
+    positions_df.to_csv(f"directional_results/{trading_day}_positions.csv", index=False)
+    orders_df.to_csv(f"directional_results/{trading_day}_orders.csv", index=False)
 
 
 # === BACKTESTING FUNCTION === #
@@ -419,37 +503,50 @@ def backtest(start_date, end_date):
             otm_ce = load_option_data(
                 nearest_expiry_folder, otm_strike, "CE", row["timestamp"]
             )
+            otm_pe = load_option_data(
+                nearest_expiry_folder, otm_strike, "PE", row["timestamp"]
+            )
 
-            if atm_ce is None or atm_pe is None or otm_ce is None:
+            if atm_ce is None or atm_pe is None or otm_ce is None or otm_pe is None:
                 continue
 
             logger.info(
-                f"ATM CE Close: {atm_ce['close']} - Volume: {atm_ce['volume']} - ATR: {atm_ce['ATR']} - VWAP: {atm_ce['VWAP']}"
+                f"ATM CE Close: {atm_ce['close']} - ADX: {atm_ce['ADX']} - EMA: {atm_ce['EMA']} - VWAP: {atm_ce['VWAP']}"
             )
 
             logger.info(
-                f"ATM PE Close: {atm_pe['close']} - Volume: {atm_pe['volume']} - ATR: {atm_pe['ATR']} - VWAP: {atm_pe['VWAP']}"
+                f"ATM PE Close: {atm_pe['close']} - ADX: {atm_pe['ADX']} - EMA: {atm_pe['EMA']} - VWAP: {atm_pe['VWAP']}"
             )
-
-            logger.info(
-                f"OTM CE Close: {otm_ce['close']} - Volume: {otm_ce['volume']} - ATR: {otm_ce['ATR']} - VWAP: {otm_ce['VWAP']}"
-            )
-
-            signal_value = otm_ce["VWAP"] + 0.5 * atm_ce["ATR"]
-
-            logger.info(f"Signal Value: {signal_value}")
 
             logger.info(f"Positions: {len(positions)}")
             logger.info(f"Orders: {len(orders)}")
 
-            # === ENTRY === #
+            # === BULLISH ENTRY === #
             if (
                 not any(position.status for position in positions)
-                and otm_ce["open"] > signal_value
+                and atm_ce["open"] > atm_ce["EMA"]
+                and atm_ce["ADX"] > 25
+                and atm_ce["+DI"] > atm_ce["-DI"]
+                and atm_ce["open"] > atm_ce["VWAP"]
                 and row["timestamp"] < pd.to_datetime(f"{trading_day} 15:20:00")
-                and otm_ce["open"] + atm_pe["open"] > 50
+                and atm_ce["open"] + otm_pe["open"] > 50
             ):
-                enter_trade(
+                enter_bullish_trade(
+                    row, atm_strike, otm_strike, atm_ce, otm_pe, positions, orders
+                )
+                continue
+
+            # === BEARISH ENTRY === #
+            if (
+                not any(position.status for position in positions)
+                and atm_pe["open"] > atm_pe["EMA"]
+                and atm_pe["ADX"] > 25
+                and atm_pe["-DI"] > atm_pe["+DI"]
+                and atm_pe["open"] > atm_pe["VWAP"]
+                and row["timestamp"] < pd.to_datetime(f"{trading_day} 15:20:00")
+                and atm_pe["open"] + otm_ce["open"] > 50
+            ):
+                enter_bearish_trade(
                     row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders
                 )
                 continue
@@ -457,12 +554,7 @@ def backtest(start_date, end_date):
             # === EXIT === #
             if any(position.status for position in positions):
                 exit_signal, exit_reason = check_exit_signal(
-                    nearest_expiry_folder,
-                    row["timestamp"],
-                    positions,
-                    signal_value,
-                    otm_ce["open"],
-                    atm_pe["open"],
+                    nearest_expiry_folder, row["timestamp"], positions
                 )
 
                 if exit_signal:

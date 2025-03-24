@@ -25,10 +25,11 @@ SLIPPAGE_PERCENT = 0.01
 ATR_PERIOD = 14
 START_TIME = "09:20:00"
 END_TIME = "15:20:00"
-EVENT_DAYS_TRADES = True
+EVENT_DAYS_TRADES = False
 EVENT_DAYS_LIST = ["2024-03-02", "2024-05-18", "2024-06-03"]
 PROFIT_TARGET = 0.2
 STOP_LOSS = 0.1
+HOLD_TIME = 120
 
 
 class Position:
@@ -240,7 +241,10 @@ def check_exit_signal(
     if pnl <= -STOP_LOSS:
         return True, "Stop Loss Hit"
 
-    if otm_ce_price + atm_pe_price < signal_value:
+    if (timestamp - call_position.entry_timestamp).total_seconds() / 60 > HOLD_TIME:
+        return True, "Hold Time Exceeded"
+
+    if call_option["open"] + put_option["open"] < signal_value:
         return True, "Signal Reversed"
 
     return False, None
@@ -354,10 +358,12 @@ def save_results(positions, orders, trading_day):
         ]
     )
 
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("semi_directional_results", exist_ok=True)
 
-    positions_df.to_csv(f"results/{trading_day}_positions.csv", index=False)
-    orders_df.to_csv(f"results/{trading_day}_orders.csv", index=False)
+    positions_df.to_csv(
+        f"semi_directional_results/{trading_day}_positions.csv", index=False
+    )
+    orders_df.to_csv(f"semi_directional_results/{trading_day}_orders.csv", index=False)
 
 
 # === BACKTESTING FUNCTION === #

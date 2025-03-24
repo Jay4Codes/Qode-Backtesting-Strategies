@@ -11,7 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/backtest_semi_directional.log"),
+        logging.FileHandler("logs/backtest_mean_reversion.log"),
         logging.StreamHandler(),
     ],
 )
@@ -22,13 +22,15 @@ NIFTY_INDEX_FILE = "database/index/nifty_2024.parquet"
 OPTIONS_FOLDER = "database/options/"
 LOT_SIZE = 75
 SLIPPAGE_PERCENT = 0.01
-ATR_PERIOD = 14
+BB_PERIOD = 20
+RSI_PERIOD = 14
 START_TIME = "09:20:00"
 END_TIME = "15:20:00"
-EVENT_DAYS_TRADES = True
+EVENT_DAYS_TRADES = False
 EVENT_DAYS_LIST = ["2024-03-02", "2024-05-18", "2024-06-03"]
 PROFIT_TARGET = 0.2
 STOP_LOSS = 0.1
+HOLD_TIME = 120
 
 
 class Position:
@@ -75,12 +77,11 @@ def load_expiry_folders():
     return os.listdir(OPTIONS_FOLDER)
 
 
-# === CALCULATE ATM & OTM STRIKES === #
-def get_atm_otm_strikes(nifty_close):
+# === CALCULATE ATM STRIKE === #
+def get_atm_strike(nifty_close):
     atm = round(nifty_close / 50) * 50
-    otm = atm + 50
 
-    return atm, otm
+    return atm
 
 
 # === LOAD OPTIONS DATA === #
@@ -93,14 +94,14 @@ def load_option_data(expiry_folder, strike, option_type, timestamp):
         df = pd.read_parquet(
             file_path,
             engine="pyarrow",
-            columns=["timestamp", "open", "high", "low", "close", "volume"],
+            columns=["timestamp", "open", "high", "low", "close"],
         )
 
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df[df["timestamp"].dt.date == timestamp.date()]
 
-        df = calculate_atr(df)
-        df = calculate_vwap(df)
+        df = calculate_bollinger_bands(df)
+        df = calculate_rsi(df)
 
         if timestamp is not None:
             df = df[df["timestamp"] == timestamp]
@@ -113,25 +114,22 @@ def load_option_data(expiry_folder, strike, option_type, timestamp):
     return None
 
 
-# === ATR CALCULATION === #
-def calculate_atr(df):
-    df["high-low"] = df["high"] - df["low"]
-    df["high-close"] = abs(df["high"] - df["close"].shift(1))
-    df["low-close"] = abs(df["low"] - df["close"].shift(1))
-    df["True Range"] = df[["high-low", "high-close", "low-close"]].max(axis=1)
-    df["ATR"] = df["True Range"].expanding(min_periods=ATR_PERIOD).mean()
-
+# === BOLLINGER BANDS CALCULATION === #
+def calculate_bollinger_bands(df):
+    df["SMA"] = df["close"].rolling(BB_PERIOD).mean()
+    df["StdDev"] = df["close"].rolling(BB_PERIOD).std()
+    df["UpperBB"] = df["SMA"] + (2 * df["StdDev"])
+    df["LowerBB"] = df["SMA"] - (2 * df["StdDev"])
     return df
 
 
-# === VWAP CALCULATION === #
-def calculate_vwap(df):
-    df["Typical Price"] = (df["high"] + df["low"] + df["close"]) / 3
-    df["Price * Volume"] = df["Typical Price"] * df["volume"]
-    df["Cumulative Volume"] = df["volume"].cumsum()
-    df["Cumulative Price * Volume"] = df["Price * Volume"].cumsum()
-    df["VWAP"] = df["Cumulative Price * Volume"] / df["Cumulative Volume"]
-
+# === RSI CALCULATION === #
+def calculate_rsi(df):
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(RSI_PERIOD).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(RSI_PERIOD).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
     return df
 
 
@@ -150,26 +148,26 @@ def get_nearest_expiry(expiry_folders, timestamp):
     return nearest_expiry_folder
 
 
-def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
-    logger.info(f"Entry: {row['timestamp']} - {otm_ce['open']}")
+def enter_trade(row, atm_strike, atm_pe, atm_ce, positions, orders):
+    logger.info(f"Entry: {row['timestamp']} - {atm_ce['open']}")
 
-    entry_ce_price = otm_ce["open"] * SLIPPAGE_PERCENT + otm_ce["open"]
+    entry_ce_price = atm_ce["open"] * SLIPPAGE_PERCENT + atm_ce["open"]
     logger.info(f"Entry Price: {entry_ce_price}")
 
     orders.append(
         Order(
             row["timestamp"],
-            otm_strike,
+            atm_strike,
             "CE",
             entry_ce_price,
-            "BUY",
+            "SELL",
         )
     )
 
     positions.append(
         Position(
             entry_timestamp=row["timestamp"],
-            strike=otm_strike,
+            strike=atm_strike,
             option_type="CE",
             entry_price=entry_ce_price,
             status=True,
@@ -185,7 +183,7 @@ def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
             atm_strike,
             "PE",
             entry_pe_price,
-            "BUY",
+            "SELL",
         )
     )
 
@@ -200,9 +198,7 @@ def enter_trade(row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders):
     )
 
 
-def check_exit_signal(
-    expiry_folder, timestamp, positions, signal_value, otm_ce_price, atm_pe_price
-):
+def check_exit_signal(expiry_folder, timestamp, positions):
     if timestamp > pd.to_datetime(f"{timestamp.date()} {END_TIME}"):
         return True, "EOD"
 
@@ -217,7 +213,7 @@ def check_exit_signal(
     )
 
     if call_option:
-        call_position_pnl = call_option["open"] - call_position.entry_price
+        call_position_pnl = call_position.entry_price - call_option["open"]
 
     put_position = [
         position for position in active_positions if position.option_type == "PE"
@@ -228,7 +224,7 @@ def check_exit_signal(
     )
 
     if put_option:
-        put_position_pnl = put_option["open"] - put_position.entry_price
+        put_position_pnl = put_position.entry_price - put_option["open"]
 
     pnl = (call_position_pnl + put_position_pnl) / (
         call_position.entry_price + put_position.entry_price
@@ -240,8 +236,11 @@ def check_exit_signal(
     if pnl <= -STOP_LOSS:
         return True, "Stop Loss Hit"
 
-    if otm_ce_price + atm_pe_price < signal_value:
-        return True, "Signal Reversed"
+    if call_option["RSI"] < 30:
+        return True, "RSI Oversold"
+
+    if (timestamp - call_position.entry_timestamp).total_seconds() / 60 >= HOLD_TIME:
+        return True, "Hold Time Exceeded"
 
     return False, None
 
@@ -322,7 +321,7 @@ def save_results(positions, orders, trading_day):
                 "Exit Price": position.exit_price,
                 "Exit Timestamp": position.exit_timestamp,
                 "Exit Reason": position.exit_reason,
-                "PnL per Lot": (position.exit_price - position.entry_price) * LOT_SIZE,
+                "PnL per Lot": (position.entry_price - position.exit_price) * LOT_SIZE,
                 "Hold Time": (
                     position.exit_timestamp - position.entry_timestamp
                 ).total_seconds()
@@ -331,7 +330,7 @@ def save_results(positions, orders, trading_day):
                 "Quantity": 1,
                 "Cost per Lot": position.entry_price * LOT_SIZE * 0.02,
                 "Net PnL per Lot": (
-                    (position.exit_price - position.entry_price) * LOT_SIZE
+                    (position.entry_price - position.exit_price) * LOT_SIZE
                 )
                 - (position.entry_price * LOT_SIZE * 0.02),
             }
@@ -354,10 +353,12 @@ def save_results(positions, orders, trading_day):
         ]
     )
 
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("mean_reversion_results", exist_ok=True)
 
-    positions_df.to_csv(f"results/{trading_day}_positions.csv", index=False)
-    orders_df.to_csv(f"results/{trading_day}_orders.csv", index=False)
+    positions_df.to_csv(
+        f"mean_reversion_results/{trading_day}_positions.csv", index=False
+    )
+    orders_df.to_csv(f"mean_reversion_results/{trading_day}_orders.csv", index=False)
 
 
 # === BACKTESTING FUNCTION === #
@@ -407,8 +408,8 @@ def backtest(start_date, end_date):
 
             logger.info(f"Processing: {row['timestamp']} - {row['close']}")
 
-            atm_strike, otm_strike = get_atm_otm_strikes(row["close"])
-            logger.info(f"ATM: {atm_strike}, OTM: {otm_strike}")
+            atm_strike = get_atm_strike(row["close"])
+            logger.info(f"ATM: {atm_strike}")
 
             atm_ce = load_option_data(
                 nearest_expiry_folder, atm_strike, "CE", row["timestamp"]
@@ -416,28 +417,17 @@ def backtest(start_date, end_date):
             atm_pe = load_option_data(
                 nearest_expiry_folder, atm_strike, "PE", row["timestamp"]
             )
-            otm_ce = load_option_data(
-                nearest_expiry_folder, otm_strike, "CE", row["timestamp"]
-            )
 
-            if atm_ce is None or atm_pe is None or otm_ce is None:
+            if atm_ce is None or atm_pe is None:
                 continue
 
             logger.info(
-                f"ATM CE Close: {atm_ce['close']} - Volume: {atm_ce['volume']} - ATR: {atm_ce['ATR']} - VWAP: {atm_ce['VWAP']}"
+                f"ATM CE Close: {atm_ce['close']} - SMA: {atm_ce['SMA']} - RSI: {atm_ce['RSI']} - UpperBB: {atm_ce['UpperBB']}"
             )
 
             logger.info(
-                f"ATM PE Close: {atm_pe['close']} - Volume: {atm_pe['volume']} - ATR: {atm_pe['ATR']} - VWAP: {atm_pe['VWAP']}"
+                f"ATM PE Close: {atm_pe['close']} - SMA: {atm_pe['SMA']} - RSI: {atm_pe['RSI']} - UpperBB: {atm_pe['UpperBB']}"
             )
-
-            logger.info(
-                f"OTM CE Close: {otm_ce['close']} - Volume: {otm_ce['volume']} - ATR: {otm_ce['ATR']} - VWAP: {otm_ce['VWAP']}"
-            )
-
-            signal_value = otm_ce["VWAP"] + 0.5 * atm_ce["ATR"]
-
-            logger.info(f"Signal Value: {signal_value}")
 
             logger.info(f"Positions: {len(positions)}")
             logger.info(f"Orders: {len(orders)}")
@@ -445,13 +435,12 @@ def backtest(start_date, end_date):
             # === ENTRY === #
             if (
                 not any(position.status for position in positions)
-                and otm_ce["open"] > signal_value
+                and atm_ce["RSI"] > 70
+                and atm_ce["open"] >= atm_ce["UpperBB"]
                 and row["timestamp"] < pd.to_datetime(f"{trading_day} 15:20:00")
-                and otm_ce["open"] + atm_pe["open"] > 50
+                and atm_ce["open"] + atm_pe["open"] > 50
             ):
-                enter_trade(
-                    row, atm_strike, otm_strike, atm_pe, otm_ce, positions, orders
-                )
+                enter_trade(row, atm_strike, atm_pe, atm_ce, positions, orders)
                 continue
 
             # === EXIT === #
@@ -460,9 +449,6 @@ def backtest(start_date, end_date):
                     nearest_expiry_folder,
                     row["timestamp"],
                     positions,
-                    signal_value,
-                    otm_ce["open"],
-                    atm_pe["open"],
                 )
 
                 if exit_signal:
