@@ -28,14 +28,14 @@
 * **Largest Winning Trade** : ₹12688.064400000003
 * **Largest Losing Trade** : ₹-5843.877675
 * **Risk Reward Ratio** : 1.7710305361167873
-* **CAGR** : -1.7579552474999995
-* **Calmar Ratio** : -0.00010948026038637148
+* **CAGR** : -0.8789776237500009
+* **Calmar Ratio** : -0.9783264444959435
 
 **Streak Analysis**
 
 * **Consecutive Wins** : 5
 * **Consecutive Losses** : 20
-* **Max Drawdown**: 16057.280475000007
+* **Max Drawdown**: 0.898450234781163
 * **Percent Profitable Days** : 0.29583333333333334
 
 ---
@@ -47,4 +47,4 @@
 
 ---
 
-*Report generated on 2025-03-24 15:22:09*
+*Report generated on 2025-03-26 16:49:41*
