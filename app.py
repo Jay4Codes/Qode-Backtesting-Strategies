@@ -171,56 +171,6 @@ def instrument_analysis(trades_df):
     with tabs[0]:
         create_advanced_visualizations(trades_df)
 
-    with tabs[3]:
-        if "Instruments" in trades_df.columns:
-            instrument_performance = (
-                trades_df.groupby("Instruments")
-                .agg(
-                    {
-                        "Net PnL per Lot": ["sum", "mean", "min", "max"],
-                        "Instruments": "count",
-                    }
-                )
-                .reset_index()
-            )
-            instrument_performance.columns = [
-                "Instruments",
-                "Total Net PnL",
-                "Total Trades",
-                "Average Net PnL",
-                "Min Net PnL",
-                "Max Net PnL",
-            ]
-
-            fig = px.bar(
-                instrument_performance,
-                x="Instruments",
-                y="Total Net PnL",
-                hover_data=["Total Trades", "Average Net PnL"],
-                title="Net PnL by Instrument",
-                color="Total Net PnL",
-                color_continuous_scale=px.colors.sequential.Viridis,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.dataframe(instrument_performance)
-
-    with tabs[2]:
-        if "Days to Expiry" in trades_df.columns:
-            fig_scatter = px.scatter(
-                trades_df,
-                x="Days to Expiry",
-                y="Net PnL per Lot",
-                color="Instruments",
-                hover_data=["Entry Timestamp", "Instruments"],
-                title="Net PnL vs Days to Expiry",
-                labels={
-                    "Days to Expiry": "Days to Expiry",
-                    "Net PnL per Lot": "Net PnL per Lot",
-                },
-                color_discrete_sequence=px.colors.qualitative.Plotly,
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
 
     with tabs[1]:
         if "Instruments" in trades_df.columns:
@@ -261,6 +211,57 @@ def instrument_analysis(trades_df):
                     }
                 )
             )
+    
+    with tabs[2]:
+        if "Days to Expiry" in trades_df.columns:
+            fig_scatter = px.scatter(
+                trades_df,
+                x="Days to Expiry",
+                y="Net PnL per Lot",
+                color="Instruments",
+                hover_data=["Entry Timestamp", "Instruments"],
+                title="Net PnL vs Days to Expiry",
+                labels={
+                    "Days to Expiry": "Days to Expiry",
+                    "Net PnL per Lot": "Net PnL per Lot",
+                },
+                color_discrete_sequence=px.colors.qualitative.Plotly,
+            )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+            
+    with tabs[3]:
+        if "Instruments" in trades_df.columns:
+            instrument_performance = (
+                trades_df.groupby("Instruments")
+                .agg(
+                    {
+                        "Net PnL per Lot": ["sum", "mean", "min", "max"],
+                        "Instruments": "count",
+                    }
+                )
+                .reset_index()
+            )
+            instrument_performance.columns = [
+                "Instruments",
+                "Total Net PnL",
+                "Total Trades",
+                "Average Net PnL",
+                "Min Net PnL",
+                "Max Net PnL",
+            ]
+
+            fig = px.bar(
+                instrument_performance,
+                x="Instruments",
+                y="Total Net PnL",
+                hover_data=["Total Trades", "Average Net PnL"],
+                title="Net PnL by Instrument",
+                color="Total Net PnL",
+                color_continuous_scale=px.colors.sequential.Viridis,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.dataframe(instrument_performance)
 
 
 def equity_curve(trades_df):
