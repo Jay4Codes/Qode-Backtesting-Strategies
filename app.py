@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objs as go
-from datetime import datetime, time
+from datetime import time
 import sys
 import os
 
@@ -49,7 +48,8 @@ def load_trades_file(uploaded_file):
 
 
 def apply_filters(trades_df):
-    st.sidebar.header("Advanced Filters")
+    st.sidebar.markdown("## 🔍 Advanced Filters")
+    st.sidebar.markdown("---")
 
     quantity_multiplier = st.sidebar.number_input(
         "Quantity Multiplier",
@@ -58,6 +58,22 @@ def apply_filters(trades_df):
         step=0.5,
         help="Multiply the PnL and other metrics by this factor",
     )
+
+    st.sidebar.markdown("### 📅 Date and Time Filters")
+
+    start_time = st.sidebar.time_input(
+        "Start Time", value=time(9, 15), help="Filter trades starting from this time"
+    )
+    end_time = st.sidebar.time_input(
+        "End Time", value=time(15, 30), help="Filter trades ending before this time"
+    )
+
+    trades_df["Entry Time"] = trades_df["Entry Timestamp"].dt.time
+    trades_df = trades_df[
+        (trades_df["Entry Time"] >= start_time) & (trades_df["Entry Time"] <= end_time)
+    ]
+
+    st.sidebar.markdown("### 📊 Additional Filters")
 
     if "Days to Expiry" in trades_df.columns:
         min_days = int(trades_df["Days to Expiry"].min())
@@ -71,16 +87,6 @@ def apply_filters(trades_df):
         trades_df = trades_df[
             (trades_df["Days to Expiry"] >= days_range[0])
             & (trades_df["Days to Expiry"] <= days_range[1])
-        ]
-
-    trades_df["Entry Time"] = trades_df["Entry Timestamp"].dt.time
-    time_filter = st.sidebar.checkbox(
-        "Filter by Trading Hours (9:15 AM to 3:00 PM)", value=True
-    )
-    if time_filter:
-        trades_df = trades_df[
-            (trades_df["Entry Time"] >= time(9, 15))
-            & (trades_df["Entry Time"] <= time(15, 0))
         ]
 
     filter_columns = [
@@ -157,69 +163,119 @@ def apply_filters(trades_df):
 
 
 def instrument_analysis(trades_df):
-    st.header("🔬 Instrument Performance Analysis")
+    st.header("🔬 Strategy Performance Analysis")
 
     tabs = st.tabs(
         [
             "General Plots",
             "Detailed Metrics",
             "Net PnL vs Days to Expiry",
-            "Instrument-wise Performance",
         ]
     )
 
     with tabs[0]:
         create_advanced_visualizations(trades_df)
 
-
     with tabs[1]:
-        if "Instruments" in trades_df.columns:
-            instrument_metrics = (
-                trades_df.groupby("Instruments")
-                .agg(
-                    {
-                        "Net PnL per Lot": ["sum", "mean", "count"],
-                        "PnL per Lot": ["mean"],
-                        "Hold Time": ["mean"],
-                        "Entry Price": ["max"],
-                        "Exit Price": ["max"],
-                    }
-                )
-                .reset_index()
+        starting_capital = st.session_state.get("starting_capital", 100000)
+        stats = calculate_stats_from_trades(trades_df, starting_capital)
+
+        st.subheader("Strategy Overview Metrics")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Net PnL", f"₹{stats['Net PnL']:,.2f}")
+            st.metric("PnL", f"₹{stats['PnL']:,.2f}")
+            st.metric("Win Rate", f"{stats['Win Rate']*100:.2f}%")
+            st.metric("Profit Factor", f"{stats['Profit Factor']:.2f}")
+            st.metric(
+                "Average Return per Trade", f"₹{stats['Average Return per Trade']:,.2f}"
+            )
+            st.metric("Calmar Ratio", f"{stats['Calmar Ratio']:.2f}")
+            st.metric("CAGR", f"{stats['CAGR']:.2f}")
+            st.metric("Total Cost", f"₹{stats['Total Cost']:,.2f}")
+            st.metric("Average Duration", f"{stats['Average Duration']}")
+            st.metric(
+                "Average Winning Trade", f"₹{stats['Average Winning Trade']:,.2f}"
+            )
+            st.metric("Average Losing Trade", f"₹{stats['Average Losing Trade']:,.2f}")
+            st.metric(
+                "Percent Profitable Days",
+                f"{stats['Percent Profitable Days']*100:.2f}%",
+            )
+            st.metric("Best Day PnL", f"₹{stats['Best Day PnL']:,.2f}")
+            st.metric("Worst Day PnL", f"₹{stats['Worst Day PnL']:,.2f}")
+            st.metric("Max Drawdown", f"{stats['Max Drawdown']:.2f}%")
+            st.metric(
+                "Day-wise PnL Drawdown", f"₹{stats['Day-wise PnL Drawdown']:,.2f}"
+            )
+            st.metric("Expiry Day Net Pnl", f"₹{stats['Expiry Day Net Pnl']:,.2f}")
+
+        with col2:
+            st.metric("Total Trades", stats["Total Trades"])
+            st.metric("Consecutive Wins", stats["Consecutive Wins"])
+            st.metric("Consecutive Losses", stats["Consecutive Losses"])
+            st.metric("Risk Reward Ratio", f"{stats['Risk Reward Ratio']:.2f}")
+            st.metric("Return on Capital", f"{stats['Return On Capital']:.2f}%")
+            st.metric(
+                "Max Capital Deployment", f"₹{stats['Max Capital Deployment']*75:,.2f}"
+            )
+            st.metric(
+                "Total Capital Deployment", f"₹{stats['Total Capital Deployment']:,.2f}"
+            )
+            st.metric(
+                "Largest Winning Trade", f"₹{stats['Largest Winning Trade']:,.2f}"
+            )
+            st.metric("Largest Losing Trade", f"₹{stats['Largest Losing Trade']:,.2f}")
+            st.metric(
+                "9:20 to 14:45 Net PnL", f"₹{stats['9:20 to 14:45 Net PnL']:,.2f}"
+            )
+            st.metric(
+                "9:20 to 14:45 Win Ratio",
+                f"{stats['9:20 to 14:45 Win Ratio']*100:.2f}%",
+            )
+            st.metric("9:20 to 14:45 Trades", stats["9:20 to 14:45 Trades"])
+            st.metric(
+                "14:45 to 15:30 Net PnL", f"₹{stats['14:45 to 15:30 Net PnL']:,.2f}"
+            )
+            st.metric(
+                "14:45 to 15:30 Win Ratio",
+                f"{stats['14:45 to 15:30 Win Ratio']*100:.2f}%",
+            )
+            st.metric("14:45 to 15:30 Trades", stats["14:45 to 15:30 Trades"])
+            st.metric(
+                "Expiry Day Win Ratio", f"{stats['Expiry Day Win Ratio']*100:.2f}%"
+            )
+            st.metric(
+                "Total Number of Expiry Trades", stats["TotalNumberOfExpiryTrades"]
             )
 
-            instrument_metrics.columns = [
-                "Instruments",
-                "Total Net PnL",
-                "Avg Net PnL",
-                "Total Trades",
-                "Avg PnL",
-                "Avg Hold Time",
-                "Max Entry Price",
-                "Max Exit Price",
-            ]
+        fig_pie = px.pie(
+            values=[stats["Profitable Trades"], stats["Losing Trades"]],
+            names=["Profitable Trades", "Losing Trades"],
+            title="Profitable vs Losing Trades",
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+        )
 
-            st.dataframe(
-                instrument_metrics.style.format(
-                    {
-                        "Total Net PnL": "{:.2f}",
-                        "Avg Net PnL": "{:.2f}",
-                        "Avg PnL": "{:.2f}",
-                        "Avg Hold Time": "{:.2f}",
-                        "Max Entry Price": "{:.2f}",
-                        "Max Exit Price": "{:.2f}",
-                    }
-                )
-            )
-    
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+        st.write(
+            "This pie chart shows the distribution of profitable and losing trades. A higher proportion of profitable trades indicates a successful trading strategy."
+        )
+
     with tabs[2]:
         if "Days to Expiry" in trades_df.columns:
             fig_scatter = px.scatter(
                 trades_df,
                 x="Days to Expiry",
                 y="Net PnL per Lot",
-                color="Instruments",
-                hover_data=["Entry Timestamp", "Instruments"],
+                color="Instruments" if "Instruments" in trades_df.columns else None,
+                hover_data=(
+                    ["Entry Timestamp", "Instruments"]
+                    if "Instruments" in trades_df.columns
+                    else ["Entry Timestamp"]
+                ),
                 title="Net PnL vs Days to Expiry",
                 labels={
                     "Days to Expiry": "Days to Expiry",
@@ -228,40 +284,9 @@ def instrument_analysis(trades_df):
                 color_discrete_sequence=px.colors.qualitative.Plotly,
             )
             st.plotly_chart(fig_scatter, use_container_width=True)
-            
-    with tabs[3]:
-        if "Instruments" in trades_df.columns:
-            instrument_performance = (
-                trades_df.groupby("Instruments")
-                .agg(
-                    {
-                        "Net PnL per Lot": ["sum", "mean", "min", "max"],
-                        "Instruments": "count",
-                    }
-                )
-                .reset_index()
+            st.write(
+                "This scatter plot shows how the Net PnL varies with the number of days to expiry. Each point represents a trade, helping you understand the relationship between trade profitability and time to expiration."
             )
-            instrument_performance.columns = [
-                "Instruments",
-                "Total Net PnL",
-                "Total Trades",
-                "Average Net PnL",
-                "Min Net PnL",
-                "Max Net PnL",
-            ]
-
-            fig = px.bar(
-                instrument_performance,
-                x="Instruments",
-                y="Total Net PnL",
-                hover_data=["Total Trades", "Average Net PnL"],
-                title="Net PnL by Instrument",
-                color="Total Net PnL",
-                color_continuous_scale=px.colors.sequential.Viridis,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.dataframe(instrument_performance)
 
 
 def equity_curve(trades_df):
@@ -285,6 +310,9 @@ def equity_curve(trades_df):
         yaxis_title="Equity (₹)",
     )
     st.plotly_chart(fig_equity_curve, use_container_width=True)
+    st.write(
+        "The Equity Curve shows the cumulative performance of your trading strategy over time. An upward trending line indicates consistent profitability, while flat or downward trends suggest the strategy might need refinement."
+    )
 
 
 def create_advanced_visualizations(filtered_trades_df):
@@ -319,6 +347,9 @@ def drawdown_analysis(trades_df):
         yaxis_title="Drawdown Amount",
     )
     st.plotly_chart(fig_drawdown, use_container_width=True)
+    st.write(
+        "The Drawdown Analysis visualizes the largest decline in portfolio value from its peak. Lower and shorter drawdowns indicate a more stable and robust trading strategy."
+    )
 
 
 def trade_profit_distribution(trades_df):
@@ -333,6 +364,9 @@ def trade_profit_distribution(trades_df):
     )
     fig_histogram.update_layout(xaxis_title="Net PnL per Lot", yaxis_title="Frequency")
     st.plotly_chart(fig_histogram, use_container_width=True)
+    st.write(
+        "This histogram shows the distribution of trade profits. A concentration of trades around zero with a slight positive skew suggests a consistent and profitable trading strategy."
+    )
 
 
 def win_loss_trades_analysis(trades_df):
@@ -374,6 +408,9 @@ def win_loss_trades_analysis(trades_df):
         barmode="group",
     )
     st.plotly_chart(fig, use_container_width=True)
+    st.write(
+        "This chart compares the number of winning and losing trades, along with their total PnL. A higher proportion of green bars indicates a more successful trading strategy."
+    )
 
 
 def monthly_pnl_trend(trades_df):
@@ -408,6 +445,9 @@ def monthly_pnl_trend(trades_df):
         barmode="overlay",
     )
     st.plotly_chart(fig, use_container_width=True)
+    st.write(
+        "The Monthly PnL Trend displays the performance of your trading strategy on a month-by-month basis. The bar chart shows monthly profits, while the red line tracks the cumulative performance over time."
+    )
 
 
 def strategy_comparison_page():
@@ -419,6 +459,10 @@ def strategy_comparison_page():
         help="Upload trade logs for different strategies to compare",
     )
 
+    starting_capital = st.sidebar.number_input(
+        "Starting Capital", min_value=0.0, value=100000.0, step=1000.0
+    )
+
     if uploaded_files:
         strategies = {}
         for uploaded_file in uploaded_files:
@@ -426,36 +470,56 @@ def strategy_comparison_page():
             trades_df = load_trades_file(uploaded_file)
 
             if trades_df is not None and not trades_df.empty:
-                stats = calculate_stats_from_trades(trades_df, starting_capital=100000)
+                stats = calculate_stats_from_trades(trades_df, starting_capital)
                 strategies[strategy_name] = {"trades_df": trades_df, "stats": stats}
 
         if strategies:
+            comparison_metrics = [
+                "Net PnL",
+                "Win Rate",
+                "Max Drawdown on Capital",
+                "Profit Factor",
+                "Total Trades",
+                "CAGR",
+                "Calmar Ratio",
+                "Average Return per Trade",
+            ]
+
             comparison_data = []
             for name, strategy in strategies.items():
                 stats = strategy["stats"]
-                comparison_data.append(
-                    {
-                        "Strategy": name,
-                        "Net PnL": stats["Net PnL"],
-                        "Win Rate": stats["Win Rate"] * 100,
-                        "Max Drawdown": stats["Max Drawdown on Capital"] * 100,
-                        "Profit Factor": stats["Profit Factor"],
-                        "Total Trades": stats["Total Trades"],
-                    }
-                )
+                strategy_data = {
+                    "Strategy": name,
+                    "Net PnL": stats["Net PnL"],
+                    "Win Rate": stats["Win Rate"] * 100,
+                    "Max Drawdown on Capital": stats["Max Drawdown on Capital"] * 100,
+                    "Profit Factor": stats["Profit Factor"],
+                    "Total Trades": stats["Total Trades"],
+                    "CAGR": stats["CAGR"] * 100,
+                    "Calmar Ratio": stats["Calmar Ratio"],
+                    "Average Return per Trade": stats["Average Return per Trade"],
+                }
+                comparison_data.append(strategy_data)
 
             comparison_df = pd.DataFrame(comparison_data)
             st.subheader("Strategy Performance Comparison")
 
-            metrics_to_compare = [
-                "Net PnL",
-                "Win Rate",
-                "Max Drawdown",
-                "Profit Factor",
-                "Total Trades",
-            ]
+            st.dataframe(
+                comparison_df.set_index("Strategy").style.format(
+                    {
+                        "Net PnL": "₹{:.2f}",
+                        "Win Rate": "{:.2f}%",
+                        "Max Drawdown on Capital": "{:.2f}%",
+                        "Profit Factor": "{:.2f}",
+                        "CAGR": "{:.2f}%",
+                        "Calmar Ratio": "{:.2f}",
+                        "Average Return per Trade": "₹{:.2f}",
+                    }
+                )
+            )
 
-            for metric in metrics_to_compare:
+            # Create comparison plots for key metrics
+            for metric in comparison_metrics:
                 fig = px.bar(
                     comparison_df,
                     x="Strategy",
@@ -465,11 +529,21 @@ def strategy_comparison_page():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.dataframe(comparison_df.set_index("Strategy"))
-
 
 def main():
     st.set_page_config(page_title="Qode's Trading Strategy Analyzer", layout="wide")
+
+    st.markdown(
+        """
+    <style>
+    .css-1aumxhk {
+        padding: 1rem;
+        margin-top: 1rem;
+    }
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
 
     page = st.sidebar.radio(
         "Navigate", ["Single Strategy Analysis", "Strategy Comparison"]
@@ -494,6 +568,7 @@ def main():
         starting_capital = st.sidebar.number_input(
             "Starting Capital", min_value=0.0, value=100000.0, step=1000.0
         )
+        st.session_state.starting_capital = starting_capital
 
         if uploaded_file is not None:
             trades_df = load_trades_file(uploaded_file)
