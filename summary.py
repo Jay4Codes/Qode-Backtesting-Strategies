@@ -6,26 +6,27 @@ import traceback
 sys.path.append(os.getcwd())
 
 
-def calculate_stats_from_trades(trades, starting_capital):
+def calculate_stats_from_trades(trades):
     try:
         stats = {}
-        current_drawdown = 0
         max_drawdown = 0
-        cumulative_pnl = 0
         peak_pnl = 0
 
-        max_capital_deployment = max(trades["Entry Price"])
-        totalCost = trades["Cost per Lot"].sum()
-        capital_deployment_total = max(trades["Entry Price"]) * len(trades) + totalCost
+        total_capital_deployment = 200000
 
-        for pnl in trades["Net PnL per Lot"]:
-            cumulative_pnl += pnl
-            if pnl > 0:
-                peak_pnl = cumulative_pnl
-                current_drawdown = 0
-            else:
-                current_drawdown = peak_pnl - cumulative_pnl
-                max_drawdown = max(max_drawdown, current_drawdown)
+        trades["Cumulative Capital"] = 200000 + trades["Net PnL per Lot"].cumsum()
+
+        max_capital_required = max(
+            trades["Entry Price"] * trades["Lot Size"] + trades["Cost per Lot"]
+        )
+
+        totalCost = trades["Cost per Lot"].sum()
+
+        for capital in trades["Cumulative Capital"]:
+            if capital > peak_pnl:
+                peak_pnl = capital
+            drawdown = (peak_pnl - capital) / peak_pnl if peak_pnl > 0 else 0
+            max_drawdown = max(max_drawdown, drawdown)
 
         if "Entry Timestamp" in trades:
             profitable_days = trades.groupby(trades["Entry Timestamp"].dt.date)[
@@ -53,6 +54,9 @@ def calculate_stats_from_trades(trades, starting_capital):
             avg_duration = trades["Hold Time"].mean()
         else:
             avg_duration = 0
+
+        cagr = (trades["Cumulative Capital"].iloc[-1] / total_capital_deployment) - 1
+        calmar_ratio = cagr / max_drawdown
 
         expiry_day_pnl = 0
         totalNumberOfExpiryTrades = 0
@@ -115,14 +119,6 @@ def calculate_stats_from_trades(trades, starting_capital):
             pnl_1445_1530 = 0
             win_ratio_1445_1530 = 0
 
-        drawDownDaily_pnl = trades.groupby(trades["Entry Timestamp"].dt.date)[
-            "Net PnL per Lot"
-        ].sum()
-        drawDownCumulative_pnl = drawDownDaily_pnl.cumsum()
-        drawDownPeak_pnl = drawDownCumulative_pnl.cummax()
-        DayWiseDrawdown = drawDownPeak_pnl - drawDownCumulative_pnl
-        daywise_max_drawdown = DayWiseDrawdown.max()
-
         trades["Month"] = trades["Entry Timestamp"].dt.to_period("M")
         monthly_pnl = trades.groupby("Month")["Net PnL per Lot"].sum()
 
@@ -130,11 +126,10 @@ def calculate_stats_from_trades(trades, starting_capital):
 
         stats.update(
             {
-                "Max Capital Deployment": max_capital_deployment,
-                "Total Capital Deployment": capital_deployment_total,
-                "Max Drawdown on Capital": (max_drawdown / max_capital_deployment),
+                "Max Capital Required": max_capital_required,
+                "Total Capital Deployment": total_capital_deployment,
                 "Return On Capital": (
-                    (trades["Net PnL per Lot"].sum()) / max_capital_deployment
+                    ((trades["Net PnL per Lot"].sum()) / total_capital_deployment) * 100
                 ),
                 "Total Cost": totalCost,
                 "PnL": trades["PnL per Lot"].sum(),
@@ -175,29 +170,8 @@ def calculate_stats_from_trades(trades, starting_capital):
                     if len(trades[trades["Net PnL per Lot"] < 0]) > 0
                     else "N/A"
                 ),
-                "CAGR": (
-                    (
-                        (
-                            (trades["Net PnL per Lot"].sum() + starting_capital)
-                            / starting_capital
-                        )
-                        - 1
-                    )
-                    if starting_capital > 0
-                    else "N/A"
-                ),
-                "Calmar Ratio": (
-                    (
-                        (
-                            (trades["Net PnL per Lot"].sum() + starting_capital)
-                            / starting_capital
-                        )
-                        - 1
-                    )
-                    / max_drawdown
-                    if max_drawdown > 0
-                    else "N/A"
-                ),
+                "CAGR": cagr,
+                "Calmar Ratio": calmar_ratio,
                 "Consecutive Wins": (
                     trades["Net PnL per Lot"]
                     .gt(0)
@@ -226,7 +200,6 @@ def calculate_stats_from_trades(trades, starting_capital):
                     profitable_days.min() if len(profitable_days) > 0 else 0
                 ),
                 "Max Drawdown": max_drawdown,
-                "Day-wise PnL Drawdown": daywise_max_drawdown,
                 "Expiry Day Net Pnl": expiry_day_pnl,
                 "Expiry Day Win Ratio": expiry_day_win_ratio,
                 "TotalNumberOfExpiryTrades": totalNumberOfExpiryTrades,
@@ -249,7 +222,7 @@ def calculate_stats_from_trades(trades, starting_capital):
         traceback.print_exc()
 
 
-def generate_markdown_report(trades, template_path, output_path, starting_capital):
+def generate_markdown_report(trades, template_path, output_path):
     try:
         with open(template_path, "r") as file:
             template = file.read()
@@ -263,8 +236,7 @@ def generate_markdown_report(trades, template_path, output_path, starting_capita
 
         stats = {
             "Trade Month": "Unknown",
-            "Max Capital Deployment": 0,
-            "Max Drawdown on Capital": 0,
+            "Max Capital Required": 0,
             "Return On Capital": 0,
             "Total Cost": 0,
             "PnL": 0,
@@ -303,7 +275,7 @@ def generate_markdown_report(trades, template_path, output_path, starting_capita
         }
 
         if not trades.empty:
-            stats.update(calculate_stats_from_trades(trades, starting_capital))
+            stats.update(calculate_stats_from_trades(trades))
 
         try:
             report = template.format(**stats)

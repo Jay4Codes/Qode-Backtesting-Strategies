@@ -5,9 +5,19 @@ import plotly.graph_objs as go
 from datetime import time
 import sys
 import os
+import base64
 
 sys.path.append(os.getcwd())
 from summary import calculate_stats_from_trades
+
+
+def get_binary_file_downloader_html(bin_file, file_label="File"):
+    with open(bin_file, "rb") as f:
+        data = f.read()
+
+    bin_str = base64.b64encode(data).decode()
+    href = f'<a href="data:file/txt;base64,{bin_str}" download="{os.path.basename(bin_file)}">{file_label}</a>'
+    return href
 
 
 def load_trades_file(uploaded_file):
@@ -27,6 +37,10 @@ def load_trades_file(uploaded_file):
 
         trades_df = trades_df[
             trades_df["Entry Timestamp"].dt.date != pd.Timestamp("2024-06-04").date()
+        ]
+
+        trades_df = trades_df[
+            trades_df["Entry Timestamp"].dt.date != pd.Timestamp("2024-04-18").date()
         ]
 
         additional_columns = [
@@ -159,6 +173,13 @@ def apply_filters(trades_df):
         if col in trades_df.columns:
             trades_df[col] *= quantity_multiplier
 
+    if st.sidebar.button("Download Filtered Trades"):
+        trades_df.to_csv("filtered_trades.csv", index=False)
+        st.markdown(
+            get_binary_file_downloader_html("filtered_trades.csv", "Filtered Trades"),
+            unsafe_allow_html=True,
+        )
+
     return trades_df
 
 
@@ -177,8 +198,7 @@ def instrument_analysis(trades_df):
         create_advanced_visualizations(trades_df)
 
     with tabs[1]:
-        starting_capital = st.session_state.get("starting_capital", 100000)
-        stats = calculate_stats_from_trades(trades_df, starting_capital)
+        stats = calculate_stats_from_trades(trades_df)
 
         st.subheader("Strategy Overview Metrics")
 
@@ -195,7 +215,7 @@ def instrument_analysis(trades_df):
             st.metric("Calmar Ratio", f"{stats['Calmar Ratio']:.2f}")
             st.metric("CAGR", f"{stats['CAGR']:.2f}")
             st.metric("Total Cost", f"₹{stats['Total Cost']:,.2f}")
-            st.metric("Average Duration", f"{stats['Average Duration']}")
+            st.metric("Average Duration", f"{stats['Average Duration']:,.2f} mins")
             st.metric(
                 "Average Winning Trade", f"₹{stats['Average Winning Trade']:,.2f}"
             )
@@ -207,9 +227,6 @@ def instrument_analysis(trades_df):
             st.metric("Best Day PnL", f"₹{stats['Best Day PnL']:,.2f}")
             st.metric("Worst Day PnL", f"₹{stats['Worst Day PnL']:,.2f}")
             st.metric("Max Drawdown", f"{stats['Max Drawdown']:.2f}%")
-            st.metric(
-                "Day-wise PnL Drawdown", f"₹{stats['Day-wise PnL Drawdown']:,.2f}"
-            )
             st.metric("Expiry Day Net Pnl", f"₹{stats['Expiry Day Net Pnl']:,.2f}")
 
         with col2:
@@ -218,9 +235,7 @@ def instrument_analysis(trades_df):
             st.metric("Consecutive Losses", stats["Consecutive Losses"])
             st.metric("Risk Reward Ratio", f"{stats['Risk Reward Ratio']:.2f}")
             st.metric("Return on Capital", f"{stats['Return On Capital']:.2f}%")
-            st.metric(
-                "Max Capital Deployment", f"₹{stats['Max Capital Deployment']*75:,.2f}"
-            )
+            st.metric("Max Capital Required", f"₹{stats['Max Capital Required']:,.2f}")
             st.metric(
                 "Total Capital Deployment", f"₹{stats['Total Capital Deployment']:,.2f}"
             )
@@ -291,13 +306,12 @@ def instrument_analysis(trades_df):
 
 def equity_curve(trades_df):
     trades_df = trades_df.sort_values("Entry Timestamp")
-    trades_df["Cumulative PnL"] = trades_df["Net PnL per Lot"].cumsum()
 
     fig_equity_curve = go.Figure()
     fig_equity_curve.add_trace(
         go.Scatter(
             x=trades_df["Entry Timestamp"],
-            y=trades_df["Cumulative PnL"],
+            y=trades_df["Cumulative Capital"],
             mode="lines",
             name="Equity Curve",
             line=dict(color="blue"),
@@ -459,10 +473,6 @@ def strategy_comparison_page():
         help="Upload trade logs for different strategies to compare",
     )
 
-    starting_capital = st.sidebar.number_input(
-        "Starting Capital", min_value=0.0, value=100000.0, step=1000.0
-    )
-
     if uploaded_files:
         strategies = {}
         for uploaded_file in uploaded_files:
@@ -470,14 +480,14 @@ def strategy_comparison_page():
             trades_df = load_trades_file(uploaded_file)
 
             if trades_df is not None and not trades_df.empty:
-                stats = calculate_stats_from_trades(trades_df, starting_capital)
+                stats = calculate_stats_from_trades(trades_df)
                 strategies[strategy_name] = {"trades_df": trades_df, "stats": stats}
 
         if strategies:
             comparison_metrics = [
                 "Net PnL",
                 "Win Rate",
-                "Max Drawdown on Capital",
+                "Max Drawdown",
                 "Profit Factor",
                 "Total Trades",
                 "CAGR",
@@ -492,10 +502,10 @@ def strategy_comparison_page():
                     "Strategy": name,
                     "Net PnL": stats["Net PnL"],
                     "Win Rate": stats["Win Rate"] * 100,
-                    "Max Drawdown on Capital": stats["Max Drawdown on Capital"] * 100,
+                    "Max Drawdown": stats["Max Drawdown"],
                     "Profit Factor": stats["Profit Factor"],
                     "Total Trades": stats["Total Trades"],
-                    "CAGR": stats["CAGR"] * 100,
+                    "CAGR": stats["CAGR"],
                     "Calmar Ratio": stats["Calmar Ratio"],
                     "Average Return per Trade": stats["Average Return per Trade"],
                 }
@@ -509,9 +519,9 @@ def strategy_comparison_page():
                     {
                         "Net PnL": "₹{:.2f}",
                         "Win Rate": "{:.2f}%",
-                        "Max Drawdown on Capital": "{:.2f}%",
+                        "Max Drawdown": "{:.2f}%",
                         "Profit Factor": "{:.2f}",
-                        "CAGR": "{:.2f}%",
+                        "CAGR": "{:.2f}",
                         "Calmar Ratio": "{:.2f}",
                         "Average Return per Trade": "₹{:.2f}",
                     }
@@ -565,11 +575,6 @@ def main():
             help="Upload your trade log in CSV or Excel format",
         )
 
-        starting_capital = st.sidebar.number_input(
-            "Starting Capital", min_value=0.0, value=100000.0, step=1000.0
-        )
-        st.session_state.starting_capital = starting_capital
-
         if uploaded_file is not None:
             trades_df = load_trades_file(uploaded_file)
 
@@ -577,9 +582,7 @@ def main():
                 filtered_trades_df = apply_filters(trades_df)
 
                 if not filtered_trades_df.empty:
-                    stats = calculate_stats_from_trades(
-                        filtered_trades_df, starting_capital
-                    )
+                    stats = calculate_stats_from_trades(filtered_trades_df)
 
                     st.header("Performance Overview")
                     col1, col2, col3 = st.columns(3)
@@ -592,7 +595,7 @@ def main():
                     with col2:
                         st.metric(
                             "Return on Capital",
-                            f"{stats['Return On Capital']*100:.2f}%",
+                            f"{stats['Return On Capital']:.2f}%",
                         )
                         st.metric("Profit Factor", f"{stats['Profit Factor']:.2f}")
                         st.metric(
@@ -603,9 +606,9 @@ def main():
                     with col3:
                         st.metric(
                             "Max Drawdown",
-                            f"{stats['Max Drawdown on Capital']*100:.2f}%",
+                            f"{stats['Max Drawdown']:.2f}%",
                         )
-                        st.metric("CAGR", f"{stats['CAGR']*100:.2f}%")
+                        st.metric("CAGR", f"{stats['CAGR']:.2f}")
                         st.metric("Calmar Ratio", f"{stats['Calmar Ratio']:.2f}")
 
                     st.header("Detailed Performance Analysis")
